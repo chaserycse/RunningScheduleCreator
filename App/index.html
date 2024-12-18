@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Running Schedule Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 30px;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        .form-container {
+            margin-bottom: 20px;
+        }
+        .schedule-container {
+            margin-top: 30px;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Generate Your Running Schedule</h1>
+
+    <form id="schedule-form" class="form-container">
+        <label for="mileage">Enter total weekly mileage:</label>
+        <input type="number" id="mileage" name="mileage" required min="1">
+        <br><br>
+
+        <label for="workout_type">Select workout type:</label>
+        <select id="workout_type" name="workout_type">
+            <option value="Easy Runs">Easy Runs</option>
+            <option value="Interval Training">Interval Training</option>
+            <option value="Mixed">Mixed</option>
+        </select>
+        <br><br>
+
+        <button type="submit">Generate Schedule</button>
+    </form>
+
+    <div id="error-message" class="error"></div>
+
+    <div id="schedule-container" class="schedule-container"></div>
+
+    <script>
+        document.getElementById('schedule-form').addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            // Clear previous schedule and error message
+            document.getElementById('schedule-container').innerHTML = '';
+            document.getElementById('error-message').innerHTML = '';
+
+            const mileage = document.getElementById('mileage').value;
+            const workoutType = document.getElementById('workout_type').value;
+
+            // Validate mileage
+            if (!mileage || mileage <= 0) {
+                document.getElementById('error-message').textContent = "Please enter a valid mileage.";
+                return;
+            }
+
+            // Send POST request to generate the schedule
+            const formData = new FormData();
+            formData.append('mileage', mileage);
+            formData.append('workout_type', workoutType);
+
+            fetch('/generate_schedule', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const scheduleContainer = document.getElementById('schedule-container');
+                const scheduleList = document.createElement('ul');
+
+                data.forEach(day => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = day;
+                    scheduleList.appendChild(listItem);
+                });
+
+                scheduleContainer.appendChild(scheduleList);
+            })
+            .catch(error => {
+                document.getElementById('error-message').textContent = "Error generating the schedule. Please try again.";
+            });
+        });
+    </script>
+
+</body>
+</html>
