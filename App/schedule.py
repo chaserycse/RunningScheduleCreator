@@ -1,33 +1,59 @@
 import json
 from http.server import SimpleHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
+import cgi  # For parsing multipart/form-data
 
 # Function to generate running schedule
 def generate_schedule(total_mileage, workout_type):
     schedule = []
-    if workout_type == "Easy Runs":
-        weekly_runs = 5  # Assume 5 easy runs per week
-        mileage_per_run = total_mileage // weekly_runs
-        for i in range(weekly_runs):
-            schedule.append(f"Day {i+1}: Easy Run - {mileage_per_run} miles")
-    elif workout_type == "Interval Training":
-        weekly_runs = 3  # 3 runs with intervals
-        mileage_per_run = total_mileage // weekly_runs
-        for i in range(weekly_runs):
-            schedule.append(f"Day {i+1}: Interval Run - {mileage_per_run} miles")
+
+    # Determine the number of training days based on total mileage
+    if total_mileage <= 41:
+        training_days = 5
+    elif 42 <= total_mileage <= 65:
+        training_days = 6
     else:
-        # Mixed schedule with easy runs, long runs, etc.
-        schedule.append(f"Day 1: Easy Run - {total_mileage // 7} miles")
-        schedule.append(f"Day 2: Easy Run - {total_mileage // 7} miles")
-        schedule.append(f"Day 3: Interval Training - {total_mileage // 10} miles")
-        schedule.append(f"Day 4: Easy Run - {total_mileage // 7} miles")
-        schedule.append(f"Day 5: Long Run - {total_mileage // 4} miles")
-        schedule.append(f"Day 6: Easy Run - {total_mileage // 7} miles")
-        schedule.append(f"Day 7: Rest Day")
-    
+        training_days = 7
+
+    # Calculate long run mileage (20% of total mileage)
+    long_run_mileage = total_mileage * 0.20  # 20% of total mileage
+
+    # Determine the day placement of rest days (for 5 training days, there should be 2 rest days)
+    rest_days = 7 - training_days
+    rest_day_indices = []
+
+    # For a 5-day training schedule, place rest days in such a way that there are 3 training days in between
+    if training_days == 5:
+        rest_day_indices = [3]  # Rest on the 4th day (Day 4)
+    elif training_days == 6:
+        rest_day_indices = [6]  # Rest on the 7th day (Day 7)
+
+    # Set up day counter
+    day_counter = 0
+
+    # Remaining mileage excluding the long run
+    remaining_mileage = total_mileage - long_run_mileage
+
+    # Calculate the mileage for each training day (excluding long run day)
+    mileage_per_run = remaining_mileage // (training_days - 1)
+
+    while day_counter < 7:
+        if day_counter in rest_day_indices:
+            schedule.append(f"Day {day_counter + 1}: Rest Day")
+        else:
+            # Since we're focusing only on "Easy Runs", we can directly assign it here
+            run_type = "Easy Run"
+
+            # Assign long run on the appropriate day (usually Day 5 for 6 or 7 days of training)
+            if day_counter == 4 and training_days > 5:  # Place long run on Day 5 for 6 or 7 days of training
+                schedule.append(f"Day {day_counter + 1}: Long Run - {long_run_mileage:.1f} miles")
+            else:
+                schedule.append(f"Day {day_counter + 1}: {run_type} - {mileage_per_run} miles")
+        
+        day_counter += 1
+
     return schedule
 
-# Request handler to process the form input and generate the schedule
+# Request handler for HTTP requests
 class RequestHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
@@ -41,22 +67,39 @@ class RequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/generate_schedule":
-            # Parse form data from the request
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = parse_qs(post_data.decode('utf-8'))
-
-            total_mileage = int(data['mileage'][0])
-            workout_type = data['workout_type'][0]
-
-            # Generate the running schedule
-            schedule = generate_schedule(total_mileage, workout_type)
-
-            # Send the response as a JSON object
-            self.send_response(200)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(schedule).encode())
+            # Parse the form data
+            content_type, _ = self.headers.get('Content-Type').split(';', 1)
+            if content_type == 'multipart/form-data':
+                # Use cgi.FieldStorage to parse multipart form data
+                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={'REQUEST_METHOD': 'POST'})
+                mileage = form.getvalue('mileage')
+                workout_type = form.getvalue('workout_type')
+            else:
+                # Handle case if content-type is something else
+                self.send_response(400)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Unsupported content type"}).encode())
+                return
+            
+            try:
+                # Ensure mileage is an integer
+                total_mileage = int(mileage)
+                # Generate the running schedule
+                schedule = generate_schedule(total_mileage, workout_type)
+                
+                # Send the response as a JSON object
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(schedule).encode())
+            
+            except (ValueError, TypeError):
+                # Handle errors in case of invalid data
+                self.send_response(400)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Invalid mileage value"}).encode())
 
 # Start the HTTP server
 def run():
@@ -67,3 +110,7 @@ def run():
 
 if __name__ == '__main__':
     run()
+
+
+
+
