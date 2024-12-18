@@ -1,115 +1,98 @@
+from urllib.parse import parse_qs
 import json
 from http.server import SimpleHTTPRequestHandler, HTTPServer
-import cgi  # For parsing multipart/form-data
 
-# Function to generate running schedule
+import re
+
 def generate_schedule(total_mileage, workout_type):
-    schedule = []
-
-    # Determine the number of training days based on total mileage
-    if total_mileage <= 41:
-        training_days = 5
-    elif 42 <= total_mileage <= 65:
-        training_days = 6
+    schedule = []  
+    
+    # Adjust long run percentage based on total mileage
+    if total_mileage < 40:
+        long_run_percentage = 0.35  # For mileage less than 40, the long run will be 35% of the total mileage
     else:
-        training_days = 7
+        long_run_percentage = 0.20  # For higher mileage, the long run remains 20%
 
-    # Calculate long run mileage (20% of total mileage)
-    long_run_mileage = total_mileage * 0.20  # 20% of total mileage
-
-    # Determine the day placement of rest days (for 5 training days, there should be 2 rest days)
+    # Calculate long run mileage
+    long_run_mileage = total_mileage * long_run_percentage
+    
+    # Training days and rest days based on the total mileage
+    training_days = 6 if total_mileage > 41 else 5
     rest_days = 7 - training_days
-    rest_day_indices = []
 
-    # For a 5-day training schedule, place rest days in such a way that there are 3 training days in between
-    if training_days == 5:
-        rest_day_indices = [3]  # Rest on the 4th day (Day 4)
-    elif training_days == 6:
-        rest_day_indices = [6]  # Rest on the 7th day (Day 7)
-
-    # Set up day counter
-    day_counter = 0
-
-    # Remaining mileage excluding the long run
+    # Remaining mileage for easy runs and recovery
     remaining_mileage = total_mileage - long_run_mileage
-
-    # Calculate the mileage for each training day (excluding long run day)
+    # Easy run mileage will be divided evenly across training days (minus one for the long run)
     mileage_per_run = remaining_mileage // (training_days - 1)
 
-    while day_counter < 7:
-        if day_counter in rest_day_indices:
-            schedule.append(f"Day {day_counter + 1}: Rest Day")
-        else:
-            # Since we're focusing only on "Easy Runs", we can directly assign it here
-            run_type = "Easy Run"
+    # Calculate recovery run mileage (75% of the mileage_per_run for the easy run)
+    recovery_run_mileage = mileage_per_run * 0.75
+    
+    # Total calculated mileage
+    total_calculated_mileage = long_run_mileage + (mileage_per_run * (training_days - 1)) + recovery_run_mileage
+    
+    # If the total calculated mileage is less than total_mileage due to integer division, add the difference to the last run
+    if total_calculated_mileage < total_mileage:
+        mileage_per_run += total_mileage - total_calculated_mileage
 
-            # Assign long run on the appropriate day (usually Day 5 for 6 or 7 days of training)
-            if day_counter == 4 and training_days > 5:  # Place long run on Day 5 for 6 or 7 days of training
-                schedule.append(f"Day {day_counter + 1}: Long Run - {long_run_mileage:.1f} miles")
-            else:
-                schedule.append(f"Day {day_counter + 1}: {run_type} - {mileage_per_run} miles")
-        
+    # Now build the schedule
+    day_counter = 0
+    recovery_run_added = False
+    while day_counter < 7:
+        if day_counter in [3, 6][:rest_days]:  # Rest days
+            schedule.append(f"Day {day_counter + 1}: Rest Day")
+        elif day_counter == 4:  # Long run day
+            schedule.append(f"Day {day_counter + 1}: Long Run - {long_run_mileage:.1f} miles")
+        elif not recovery_run_added and day_counter != 4:  # Add recovery run once
+            schedule.append(f"Day {day_counter + 1}: Recovery Run - {recovery_run_mileage:.1f} miles")
+            recovery_run_added = True
+        else:  # Easy run day
+            schedule.append(f"Day {day_counter + 1}: Easy Run - {mileage_per_run:.1f} miles")
         day_counter += 1
 
-    return schedule
+    # Double check if total mileage is accurate using regular expression to extract mileage
+    calculated_total = 0
+    for line in schedule:
+        # Extract the numeric part after the "Run - " keyword
+        match = re.search(r'(\d+(\.\d+)?) miles', line)
+        if match:
+            calculated_total += float(match.group(1))
+    
+    print(f"Calculated Total Mileage: {calculated_total}")
+    return {"schedule": schedule}
 
-# Request handler for HTTP requests
 class RequestHandler(SimpleHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/":
-            # Serve the HTML form
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(open('index.html', 'rb').read())
-        else:
-            super().do_GET()
-
     def do_POST(self):
         if self.path == "/generate_schedule":
-            # Parse the form data
-            content_type, _ = self.headers.get('Content-Type').split(';', 1)
-            if content_type == 'multipart/form-data':
-                # Use cgi.FieldStorage to parse multipart form data
-                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={'REQUEST_METHOD': 'POST'})
-                mileage = form.getvalue('mileage')
-                workout_type = form.getvalue('workout_type')
-            else:
-                # Handle case if content-type is something else
-                self.send_response(400)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "Unsupported content type"}).encode())
-                return
-            
-            try:
-                # Ensure mileage is an integer
-                total_mileage = int(mileage)
-                # Generate the running schedule
-                schedule = generate_schedule(total_mileage, workout_type)
-                
-                # Send the response as a JSON object
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(schedule).encode())
-            
-            except (ValueError, TypeError):
-                # Handle errors in case of invalid data
-                self.send_response(400)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "Invalid mileage value"}).encode())
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            form = parse_qs(post_data.decode())
 
-# Start the HTTP server
+            mileage = form.get('mileage', [''])[0]
+            workout_type = form.get('workout_type', [''])[0]
+
+            total_mileage = int(mileage)
+            response = generate_schedule(total_mileage, workout_type)
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode())
+
+# Start the server
 def run():
-    server_address = ('', 8000)  # Localhost, port 8000
+    server_address = ('', 8001)  # Use port 8001 instead of 8000 if 8000 is in use
     httpd = HTTPServer(server_address, RequestHandler)
-    print("Server running on http://localhost:8000")
+    print("Server running on http://localhost:8001")
     httpd.serve_forever()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
+
+
+
+
+
 
 
 
