@@ -1,79 +1,76 @@
-from urllib.parse import parse_qs
 import json
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
-import re
+def generate_training_plan(initial_mileage, target_mileage, duration=12):
+    # Function to round to the nearest even number
+    def round_to_even(num):
+        return round(num / 2) * 2
 
-def generate_schedule(total_mileage, workout_type):
-    schedule = []  
-    
-    # Adjust long run percentage based on total mileage
-    if total_mileage < 40:
-        long_run_percentage = 0.35  # For mileage less than 40, the long run will be 35% of the total mileage
-    else:
-        long_run_percentage = 0.20  # For higher mileage, the long run remains 20%
+    # Total increase required over the duration
+    total_increase = target_mileage - initial_mileage
+    increase_per_week = total_increase / (duration - 1)  # Distribute the increase across weeks
 
-    # Calculate long run mileage
-    long_run_mileage = total_mileage * long_run_percentage
-    
-    # Training days and rest days based on the total mileage
-    training_days = 6 if total_mileage > 41 else 5
-    rest_days = 7 - training_days
+    plan = []
+    current_mileage = initial_mileage
 
-    # Remaining mileage for easy runs and recovery
-    remaining_mileage = total_mileage - long_run_mileage
-    # Easy run mileage will be divided evenly across training days (minus one for the long run)
-    mileage_per_run = remaining_mileage // (training_days - 1)
+    for week in range(1, duration + 1):
+        # Ensure weekly mileage is within target bounds
+        weekly_mileage = round_to_even(current_mileage)  # Ensure mileage is an even number
 
-    # Calculate recovery run mileage (75% of the mileage_per_run for the easy run)
-    recovery_run_mileage = mileage_per_run * 0.75
-    
-    # Total calculated mileage
-    total_calculated_mileage = long_run_mileage + (mileage_per_run * (training_days - 1)) + recovery_run_mileage
-    
-    # If the total calculated mileage is less than total_mileage due to integer division, add the difference to the last run
-    if total_calculated_mileage < total_mileage:
-        mileage_per_run += total_mileage - total_calculated_mileage
+        # Plan for a single week
+        week_plan = {
+            'week': week,
+            'mileage': weekly_mileage,
+            'schedule': []
+        }
 
-    # Now build the schedule
-    day_counter = 0
-    recovery_run_added = False
-    while day_counter < 7:
-        if day_counter in [3, 6][:rest_days]:  # Rest days
-            schedule.append(f"Day {day_counter + 1}: Rest Day")
-        elif day_counter == 4:  # Long run day
-            schedule.append(f"Day {day_counter + 1}: Long Run - {long_run_mileage:.1f} miles")
-        elif not recovery_run_added and day_counter != 4:  # Add recovery run once
-            schedule.append(f"Day {day_counter + 1}: Recovery Run - {recovery_run_mileage:.1f} miles")
-            recovery_run_added = True
-        else:  # Easy run day
-            schedule.append(f"Day {day_counter + 1}: Easy Run - {mileage_per_run:.1f} miles")
-        day_counter += 1
+        # For 38 miles or lower, only run 5 days
+        if weekly_mileage <= 38:
+            week_plan['schedule'] = [
+                f"Day 1: Rest",  # Monday
+                f"Day 2: {round_to_even(weekly_mileage * 0.2)} miles - Aerobic",
+                f"Day 3: {round_to_even(weekly_mileage * 0.15)} miles - Endurance",
+                f"Day 4: {round_to_even(weekly_mileage * 0.2)} miles - Aerobic",
+                f"Day 5: {round_to_even(weekly_mileage * 0.15)} miles - Recovery",
+                f"Day 6: {round_to_even(weekly_mileage * 0.2)} miles - Aerobic",
+                f"Day 7: {round_to_even(weekly_mileage * 0.3)} miles - Long Run"
+            ]
+        else:
+            # For 40 miles or higher, run 6 days with 1 rest day
+            week_plan['schedule'] = [
+                f"Day 1: Rest",  # Monday
+                f"Day 2: {round_to_even(weekly_mileage * 0.2)} miles - Aerobic",
+                f"Day 3: {round_to_even(weekly_mileage * 0.15)} miles - Endurance",
+                f"Day 4: {round_to_even(weekly_mileage * 0.15)} miles - Aerobic",
+                f"Day 5: {round_to_even(weekly_mileage * 0.1)} miles - Recovery",
+                f"Day 6: {round_to_even(weekly_mileage * 0.2)} miles - Aerobic",
+                f"Day 7: {round_to_even(weekly_mileage * 0.3)} miles - Long Run"
+            ]
 
-    # Double check if total mileage is accurate using regular expression to extract mileage
-    calculated_total = 0
-    for line in schedule:
-        # Extract the numeric part after the "Run - " keyword
-        match = re.search(r'(\d+(\.\d+)?) miles', line)
-        if match:
-            calculated_total += float(match.group(1))
-    
-    print(f"Calculated Total Mileage: {calculated_total}")
-    return {"schedule": schedule}
+        # Add this week's plan to the overall plan
+        plan.append(week_plan)
+
+        # Increment weekly mileage based on the calculated increase per week
+        current_mileage += increase_per_week
+        current_mileage = min(current_mileage, target_mileage)  # Ensure we do not exceed target mileage
+
+    return {"plan": plan}
 
 class RequestHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
-        if self.path == "/generate_schedule":
+        if self.path == "/generate_training_plan":
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
-            form = parse_qs(post_data.decode())
+            data = json.loads(post_data.decode())  # Parse the JSON data
 
-            mileage = form.get('mileage', [''])[0]
-            workout_type = form.get('workout_type', [''])[0]
+            initial_mileage = int(data.get('initial_mileage', 0))
+            target_mileage = int(data.get('target_mileage', 0))
+            duration = int(data.get('duration', 12))
 
-            total_mileage = int(mileage)
-            response = generate_schedule(total_mileage, workout_type)
+            # Generate the training plan
+            response = generate_training_plan(initial_mileage, target_mileage, duration)
 
+            # Send the response back as JSON
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
@@ -81,19 +78,10 @@ class RequestHandler(SimpleHTTPRequestHandler):
 
 # Start the server
 def run():
-    server_address = ('', 8001)  # Use port 8001 instead of 8000 if 8000 is in use
+    server_address = ('', 8001)  # Use port 8001
     httpd = HTTPServer(server_address, RequestHandler)
     print("Server running on http://localhost:8001")
     httpd.serve_forever()
 
 if __name__ == "__main__":
     run()
-
-
-
-
-
-
-
-
-

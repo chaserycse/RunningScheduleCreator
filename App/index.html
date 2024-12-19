@@ -9,47 +9,93 @@
 <body class="bg-gray-100 font-sans">
 
     <div class="container mx-auto p-6">
-        <h1 class="text-3xl font-semibold text-center text-gray-800 mb-6">Generate Your Running Schedule</h1>
+        <h1 class="text-3xl font-semibold text-center text-gray-800 mb-6">Generate Your Training Plan</h1>
 
-        <form id="schedule-form" class="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto space-y-4">
+        <!-- Training Plan Form -->
+        <form id="training-plan-form" class="bg-white p-6 rounded-lg shadow-md max-w-lg mx-auto space-y-4">
             <div>
-                <label for="mileage" class="block text-lg text-gray-700">Enter total weekly mileage:</label>
-                <input type="number" id="mileage" name="mileage" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required min="1">
+                <label for="initial_mileage" class="block text-lg text-gray-700">Starting Weekly Mileage:</label>
+                <input type="number" id="initial_mileage" name="initial_mileage" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required min="1">
             </div>
             <div>
-                <label for="workout_type" class="block text-lg text-gray-700">Select workout type:</label>
-                <select id="workout_type" name="workout_type" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="Easy Runs">Easy Runs</option>
-                </select>
+                <label for="target_mileage" class="block text-lg text-gray-700">Target Weekly Mileage:</label>
+                <input type="number" id="target_mileage" name="target_mileage" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required min="1">
+            </div>
+            <div>
+                <label for="duration" class="block text-lg text-gray-700">Training Duration (weeks):</label>
+                <input type="number" id="duration" name="duration" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required min="4" value="12">
             </div>
             <button type="submit" class="mt-4 px-6 py-2 bg-blue-500 text-white font-semibold rounded-md hover:bg-blue-600 focus:outline-none">
-                Generate Schedule
+                Generate Plan
             </button>
         </form>
 
-        <div id="schedule-container" class="mt-6"></div>
+        <!-- Training Plan Display -->
+        <div id="training-plan-container" class="mt-6"></div>
         
         <script>
-        document.getElementById('schedule-form').addEventListener('submit', function(event) {
-            event.preventDefault();
-            const mileage = document.getElementById('mileage').value;
-            const workoutType = document.getElementById('workout_type').value;
-        
-            fetch('/generate_schedule', {
-                method: 'POST',
-                body: new URLSearchParams({ mileage, workoutType }),
-            })
-            .then(response => response.json())
-            .then(data => {
-                const scheduleContainer = document.getElementById('schedule-container');
-        
-                scheduleContainer.innerHTML = `<h2>Running Schedule</h2><ul>${data.schedule.map(day => `<li>${day}</li>`).join('')}</ul>`;
-            })
-            .catch(err => console.error('Error generating schedule:', err));
-        });
-        </script>  
+document.getElementById('training-plan-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const initialMileage = document.getElementById('initial_mileage').value;
+    const targetMileage = document.getElementById('target_mileage').value;
+    const duration = document.getElementById('duration').value;
+
+    // Create the payload as a JSON object
+    const requestData = {
+        initial_mileage: initialMileage,
+        target_mileage: targetMileage,
+        duration: duration
+    };
+
+    fetch('/generate_training_plan', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',  // Ensure we are sending JSON
+        },
+        body: JSON.stringify(requestData),  // Convert the object to a JSON string
+    })
+    .then(response => response.json())  // Parse the response as JSON
+    .then(data => {
+        const container = document.getElementById('training-plan-container');
+        container.innerHTML = '';  // Clear any previous content
+
+        // Check if the response has the 'plan' property
+        if (data && data.plan) {
+            data.plan.forEach(week => {
+                const weekDiv = document.createElement('div');
+                weekDiv.className = 'bg-white p-4 rounded-lg shadow-md mb-4';
+
+                const weekTitle = document.createElement('h2');
+                weekTitle.className = 'text-xl font-semibold mb-2';
+                weekTitle.textContent = `Week ${week.week} - ${Math.round(week.mileage)} miles`;
+
+                const scheduleList = document.createElement('ul');
+                scheduleList.className = 'list-disc list-inside';
+
+                week.schedule.forEach(day => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = day;
+                    scheduleList.appendChild(listItem);
+                });
+
+                weekDiv.appendChild(weekTitle);
+                weekDiv.appendChild(scheduleList);
+                container.appendChild(weekDiv);
+            });
+        } else {
+            container.innerHTML = `<p class="text-red-500">Failed to generate a training plan. Please check your inputs.</p>`;
+        }
+    })
+    .catch(err => {
+        console.error('Error generating training plan:', err);
+        const container = document.getElementById('training-plan-container');
+        container.innerHTML = `<p class="text-red-500">There was an error processing your request.</p>`;
+    });
+});
+
+        </script>
+    </div>
 
 </body>
 </html>
-
-
